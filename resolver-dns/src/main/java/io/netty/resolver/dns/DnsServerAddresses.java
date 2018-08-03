@@ -66,7 +66,16 @@ public abstract class DnsServerAddresses {
      * last address is yielded, it will start again from the first address.
      */
     public static DnsServerAddresses sequential(Iterable<? extends InetSocketAddress> addresses) {
-        return sequential0(sanitize(addresses));
+        return sequential0(false, sanitize(false, addresses));
+    }
+
+    /**
+     * Returns the {@link DnsServerAddresses} that yields the specified {@code addresses} sequentially. Once the
+     * last address is yielded, it will start again from the first address. The returned {@link DnsServerAddresses} may
+     * contain non-resolved {@link InetSocketAddress} instances.
+     */
+    static DnsServerAddresses sequentialUnresolved(Iterable<? extends InetSocketAddress> addresses) {
+        return sequential0(true, sanitize(true, addresses));
     }
 
     /**
@@ -74,12 +83,12 @@ public abstract class DnsServerAddresses {
      * last address is yielded, it will start again from the first address.
      */
     public static DnsServerAddresses sequential(InetSocketAddress... addresses) {
-        return sequential0(sanitize(addresses));
+        return sequential0(false, sanitize(addresses));
     }
 
-    private static DnsServerAddresses sequential0(final InetSocketAddress... addresses) {
+    private static DnsServerAddresses sequential0(boolean allowUnresolved, final InetSocketAddress... addresses) {
         if (addresses.length == 1) {
-            return singleton(addresses[0]);
+            return singleton(allowUnresolved, addresses[0]);
         }
 
         return new DefaultDnsServerAddresses("sequential", addresses) {
@@ -95,7 +104,7 @@ public abstract class DnsServerAddresses {
      * addresses are yielded, the addresses are shuffled again.
      */
     public static DnsServerAddresses shuffled(Iterable<? extends InetSocketAddress> addresses) {
-        return shuffled0(sanitize(addresses));
+        return shuffled0(sanitize(false, addresses));
     }
 
     /**
@@ -126,7 +135,7 @@ public abstract class DnsServerAddresses {
      * second one will start from the second address, and so on.
      */
     public static DnsServerAddresses rotational(Iterable<? extends InetSocketAddress> addresses) {
-        return rotational0(sanitize(addresses));
+        return rotational0(sanitize(false, addresses));
     }
 
     /**
@@ -151,17 +160,22 @@ public abstract class DnsServerAddresses {
      * Returns the {@link DnsServerAddresses} that yields only a single {@code address}.
      */
     public static DnsServerAddresses singleton(final InetSocketAddress address) {
+        return singleton(false, address);
+    }
+
+    private static DnsServerAddresses singleton(final boolean allowUnresolved, final InetSocketAddress address) {
         if (address == null) {
             throw new NullPointerException("address");
         }
-        if (address.isUnresolved()) {
+        if (!allowUnresolved && address.isUnresolved()) {
             throw new IllegalArgumentException("cannot use an unresolved DNS server address: " + address);
         }
 
         return new SingletonDnsServerAddresses(address);
     }
 
-    private static InetSocketAddress[] sanitize(Iterable<? extends InetSocketAddress> addresses) {
+    private static InetSocketAddress[] sanitize(
+            boolean allowUnresolved, Iterable<? extends InetSocketAddress> addresses) {
         if (addresses == null) {
             throw new NullPointerException("addresses");
         }
@@ -177,7 +191,7 @@ public abstract class DnsServerAddresses {
             if (a == null) {
                 break;
             }
-            if (a.isUnresolved()) {
+            if (!allowUnresolved && a.isUnresolved()) {
                 throw new IllegalArgumentException("cannot use an unresolved DNS server address: " + a);
             }
             list.add(a);

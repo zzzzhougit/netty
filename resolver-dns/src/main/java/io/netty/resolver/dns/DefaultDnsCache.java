@@ -168,38 +168,13 @@ public class DefaultDnsCache implements DnsCache {
     private void cache0(String hostname, DefaultDnsCacheEntry e, int ttl, EventLoop loop) {
         Entries entries = resolveCache.get(hostname);
         if (entries == null) {
-            entries = new Entries(e);
+            entries = new Entries(hostname);
             Entries oldEntries = resolveCache.putIfAbsent(hostname, entries);
             if (oldEntries != null) {
                 entries = oldEntries;
             }
         }
-        entries.add(e);
-
-        scheduleCacheExpiration(hostname, e, ttl, loop);
-    }
-
-    private void scheduleCacheExpiration(final String hostname, final DefaultDnsCacheEntry e,
-                                         int ttl,
-                                         EventLoop loop) {
-        e.scheduleExpiration(loop, new Runnable() {
-                    @Override
-                    public void run() {
-                        // We always remove all entries for a hostname once one entry expire. This is not the
-                        // most efficient to do but this way we can guarantee that if a DnsResolver
-                        // be configured to prefer one ip family over the other we will not return unexpected
-                        // results to the enduser if one of the A or AAAA records has different TTL settings.
-                        //
-                        // As a TTL is just a hint of the maximum time a cache is allowed to cache stuff it's
-                        // completely fine to remove the entry even if the TTL is not reached yet.
-                        //
-                        // See https://github.com/netty/netty/issues/7329
-                        Entries entries = resolveCache.remove(hostname);
-                        if (entries != null) {
-                            entries.clearAndCancel();
-                        }
-                    }
-                }, ttl, TimeUnit.SECONDS);
+        entries.add(e, ttl, loop);
     }
 
     @Override
@@ -217,7 +192,6 @@ public class DefaultDnsCache implements DnsCache {
         private final String hostname;
         private final InetAddress address;
         private final Throwable cause;
-        private volatile ScheduledFuture<?> expirationFuture;
 
         DefaultDnsCacheEntry(String hostname, InetAddress address) {
             this.hostname = checkNotNull(hostname, "hostname");
@@ -241,16 +215,8 @@ public class DefaultDnsCache implements DnsCache {
             return cause;
         }
 
-        void scheduleExpiration(EventLoop loop, Runnable task, long delay, TimeUnit unit) {
-            assert expirationFuture == null : "expiration task scheduled already";
-            expirationFuture = loop.schedule(task, delay, unit);
-        }
-
-        void cancelExpiration() {
-            ScheduledFuture<?> expirationFuture = this.expirationFuture;
-            if (expirationFuture != null) {
-                expirationFuture.cancel(false);
-            }
+        String hostname() {
+            return hostname;
         }
 
         @Override
@@ -264,13 +230,19 @@ public class DefaultDnsCache implements DnsCache {
     }
 
     // Directly extend AtomicReference for intrinsics and also to keep memory overhead low.
-    private static final class Entries extends AtomicReference<List<DefaultDnsCacheEntry>> {
+    private final class Entries extends AtomicReference<List<DefaultDnsCacheEntry>> implements Runnable {
 
-        Entries(DefaultDnsCacheEntry entry) {
-            super(Collections.singletonList(entry));
+        private final String hostname;
+
+        // This is guarded by a synchronized block.
+        private ScheduledFuture<?> expirationFuture;
+
+        Entries(String hostname) {
+            super(Collections.<DefaultDnsCacheEntry>emptyList());
+            this.hostname = hostname;
         }
 
-        void add(DefaultDnsCacheEntry e) {
+        void add(DefaultDnsCacheEntry e, int ttl, EventLoop loop) {
             if (e.cause() == null) {
                 for (;;) {
                     List<DefaultDnsCacheEntry> entries = get();
@@ -278,8 +250,9 @@ public class DefaultDnsCache implements DnsCache {
                         final DefaultDnsCacheEntry firstEntry = entries.get(0);
                         if (firstEntry.cause() != null) {
                             assert entries.size() == 1;
+
                             if (compareAndSet(entries, Collections.singletonList(e))) {
-                                firstEntry.cancelExpiration();
+                                scheduleCacheExpirationIfNeeded(ttl, loop);
                                 return;
                             } else {
                                 // Need to try again as CAS failed
@@ -305,17 +278,38 @@ public class DefaultDnsCache implements DnsCache {
                         newEntries.add(e);
                         if (compareAndSet(entries, newEntries)) {
                             if (replacedEntry != null) {
-                                replacedEntry.cancelExpiration();
+                                // We don't care if the replaced entry may have had a smaller TTL. At worse we will
+                                // clear the cache a bit to early which is fine as the TTL is just the maximum time
+                                // we are allowed to cache the entry.
                             }
+
+                            scheduleCacheExpirationIfNeeded(ttl, loop);
                             return;
                         }
                     } else if (compareAndSet(entries, Collections.singletonList(e))) {
+                        scheduleCacheExpirationIfNeeded(ttl, loop);
                         return;
                     }
                 }
             } else {
-                List<DefaultDnsCacheEntry> entries = getAndSet(Collections.singletonList(e));
-                cancelExpiration(entries);
+                set(Collections.singletonList(e));
+                scheduleCacheExpirationIfNeeded(ttl, loop);
+            }
+        }
+
+        private void scheduleCacheExpirationIfNeeded(int ttl, EventLoop loop) {
+            ScheduledFuture<?> oldScheduled;
+
+            synchronized (this) {
+                oldScheduled = this.expirationFuture;
+                if (oldScheduled == null || oldScheduled.getDelay(TimeUnit.SECONDS) > ttl) {
+                    this.expirationFuture = loop.schedule(this, ttl, TimeUnit.SECONDS);
+                } else {
+                    oldScheduled = null;
+                }
+            }
+            if (oldScheduled != null) {
+                oldScheduled.cancel(false);
             }
         }
 
@@ -325,15 +319,28 @@ public class DefaultDnsCache implements DnsCache {
                 return false;
             }
 
-            cancelExpiration(entries);
+            ScheduledFuture<?> expirationFuture = this.expirationFuture;
+            if (expirationFuture != null) {
+                expirationFuture.cancel(false);
+            }
+
             return true;
         }
 
-        private static void cancelExpiration(List<DefaultDnsCacheEntry> entryList) {
-            final int numEntries = entryList.size();
-            for (int i = 0; i < numEntries; i++) {
-                entryList.get(i).cancelExpiration();
-            }
+        @Override
+        public void run() {
+            // We always remove all entries for a hostname once one entry expire. This is not the
+            // most efficient to do but this way we can guarantee that if a DnsResolver
+            // be configured to prefer one ip family over the other we will not return unexpected
+            // results to the enduser if one of the A or AAAA records has different TTL settings.
+            //
+            // As a TTL is just a hint of the maximum time a cache is allowed to cache stuff it's
+            // completely fine to remove the entry even if the TTL is not reached yet.
+            //
+            // See https://github.com/netty/netty/issues/7329
+            resolveCache.remove(hostname, this);
+
+            clearAndCancel();
         }
     }
 

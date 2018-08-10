@@ -100,12 +100,12 @@ final class DnsAddressResolveContext extends DnsResolveContext<InetAddress> {
     }
 
     @Override
-    protected DnsCache resolveCache() {
+    DnsCache resolveCache() {
         return resolveCache;
     }
 
     @Override
-    protected AuthoritativeDnsServerCache authoritativeDnsServerCache() {
+    AuthoritativeDnsServerCache authoritativeDnsServerCache() {
         return authoritativeDnsServerCache;
     }
 }

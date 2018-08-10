@@ -52,10 +52,13 @@ final class AuthoritativeDnsServerCacheAdapter implements AuthoritativeDnsServer
         }
 
         List<InetSocketAddress> addresses = new ArrayList<InetSocketAddress>(entries.size());
-        for (int i = 0; i < entries.size(); i++) {
+
+        int i = 0;
+        do {
             InetAddress addr = entries.get(i).address();
             addresses.add(new InetSocketAddress(addr, DefaultDnsServerAddressStreamProvider.DNS_PORT));
-        }
+            i++;
+        } while (i < entries.size());
         return addresses;
     }
 

@@ -362,7 +362,7 @@ public class DnsNameResolver extends InetNameResolver {
             default:
                 throw new IllegalArgumentException("Unknown ResolvedAddressTypes " + resolvedAddressTypes);
         }
-        this.authoritativeDnsServerCache = authoritativeDnsServerCache;
+        this.authoritativeDnsServerCache = checkNotNull(authoritativeDnsServerCache, "authoritativeDnsServerCache");
 
         Bootstrap b = new Bootstrap();
         b.group(executor());

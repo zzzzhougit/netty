@@ -38,7 +38,7 @@ import static io.netty.util.internal.ObjectUtil.checkPositiveOrZero;
 
 /**
  * Default implementation of {@link AuthoritativeDnsServerCache}, backed by a {@link ConcurrentMap}.
- * */
+ */
 @UnstableApi
 public class DefaultAuthoritativeDnsServerCache implements AuthoritativeDnsServerCache {
 
@@ -140,8 +140,7 @@ public class DefaultAuthoritativeDnsServerCache implements AuthoritativeDnsServe
         } else {
             ttl = originalTtl;
         }
-        scheduleCacheExpiration(key, e, Math.max(minTtl,
-                Math.min(MAX_SUPPORTED_TTL_SECS, (int) Math.min(maxTtl, ttl))), loop);
+        scheduleCacheExpiration(key, e, Math.max(minTtl, (int) Math.min(maxTtl, ttl)), loop);
     }
 
     @Override
@@ -186,12 +185,8 @@ public class DefaultAuthoritativeDnsServerCache implements AuthoritativeDnsServe
 
     @Override
     public String toString() {
-        return new StringBuilder()
-                .append("DefaultAuthoritativeDnsServerCache(minTtl=")
-                .append(minTtl).append(", maxTtl=")
-                .append(maxTtl).append(", cached nameservers=")
-                .append(resolveCache.size()).append(")")
-                .toString();
+        return "DefaultAuthoritativeDnsServerCache(minTtl=" + minTtl + ", maxTtl=" + maxTtl + ", cached nameservers=" +
+                resolveCache.size() + ')';
     }
 
     private static final class Entry {
@@ -308,8 +303,7 @@ public class DefaultAuthoritativeDnsServerCache implements AuthoritativeDnsServe
         }
 
         boolean clearAndCancel() {
-            EntryList entryList = getAndSet(EntryList.EMPTY);
-            return entryList.cancelExpiration();
+            return getAndSet(EntryList.EMPTY).cancelExpiration();
         }
     }
 

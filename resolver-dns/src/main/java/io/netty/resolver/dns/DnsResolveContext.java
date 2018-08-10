@@ -127,14 +127,14 @@ abstract class DnsResolveContext<T> {
     /**
      * The {@link DnsCache} to use while resolving.
      */
-    protected DnsCache resolveCache() {
+    DnsCache resolveCache() {
         return parent.resolveCache();
     }
 
     /**
      * The {@link AuthoritativeDnsServerCache} to use while resolving.
      */
-    protected AuthoritativeDnsServerCache authoritativeDnsServerCache() {
+    AuthoritativeDnsServerCache authoritativeDnsServerCache() {
         return parent.authoritativeDnsServerCache();
     }
 
@@ -369,10 +369,10 @@ abstract class DnsResolveContext<T> {
                     }
                 } finally {
                     tryToFinishResolve(nameServerAddrStream, nameServerAddrStreamIndex, question,
-                            // queryLifecycleObserver has already been terminated at this point so we must
-                            // not allow it to be terminated again by tryToFinishResolve.
-                            NoopDnsQueryLifecycleObserver.INSTANCE,
-                            promise, queryCause);
+                                       // queryLifecycleObserver has already been terminated at this point so we must
+                                       // not allow it to be terminated again by tryToFinishResolve.
+                                       NoopDnsQueryLifecycleObserver.INSTANCE,
+                                       promise, queryCause);
                 }
             }
         });
@@ -429,7 +429,7 @@ abstract class DnsResolveContext<T> {
                     resolveCache(), new AuthoritativeDnsServerCache() {
                 @Override
                 public List<InetSocketAddress> get(String hostname) {
-                    // To not risk falling into any loop, we will not use the cache during follow redirects but only
+                    // To not risk falling into any loop, we will not use the cache while following redirects but only
                     // on the initial query.
                     return Collections.emptyList();
                 }
@@ -544,18 +544,15 @@ abstract class DnsResolveContext<T> {
                     unresolvedNameServers = new LinkedHashSet<InetSocketAddress>(serverNames.numUnhandled());
 
                     // Process all unresolved nameservers as well.
-                    for (;;) {
-                        final AuthoritativeNameServer authoritativeNameServer = serverNames.handleNext();
-                        if (authoritativeNameServer == null) {
-                            break;
-                        }
+                    AuthoritativeNameServer authoritativeNameServer = serverNames.handleNext();
+                    do {
                         // These will be resolved on the fly if needed.
                         final InetSocketAddress unresolved = InetSocketAddress.createUnresolved(
                                 authoritativeNameServer.nsName, DefaultDnsServerAddressStreamProvider.DNS_PORT);
                         unresolvedNameServers.add(unresolved);
 
                         addNameServerToCache(authoritativeNameServer, unresolved, authoritativeNameServer.timeToLive());
-                    }
+                    } while ((authoritativeNameServer = serverNames.handleNext()) != null);
                 } else {
                     unresolvedNameServers = Collections.emptySet();
                 }

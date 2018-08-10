@@ -157,24 +157,7 @@ public class DnsNameResolver extends InetNameResolver {
     final DatagramChannel ch;
 
     // Comparator that ensures we will try first to use the nameservers that use our preferred address type.
-    private final Comparator<InetSocketAddress> nameServerComparator = new Comparator<InetSocketAddress>() {
-        @Override
-        public int compare(InetSocketAddress addr1, InetSocketAddress addr2) {
-            if (addr1.equals(addr2)) {
-                return 0;
-            }
-            if (!addr1.isUnresolved() &&
-                    preferredAddressType().addressType().isAssignableFrom(addr1.getAddress().getClass())) {
-                return 1;
-            }
-            if (!addr2.isUnresolved() &&
-                    preferredAddressType().addressType().isAssignableFrom(addr2.getAddress().getClass())) {
-                return -1;
-            }
-            return 1;
-        }
-    };
-
+    private final Comparator<InetSocketAddress> nameServerComparator;
     /**
      * Manages the {@link DnsQueryContext}s in progress and their query IDs.
      */
@@ -363,6 +346,7 @@ public class DnsNameResolver extends InetNameResolver {
                 throw new IllegalArgumentException("Unknown ResolvedAddressTypes " + resolvedAddressTypes);
         }
         this.authoritativeDnsServerCache = checkNotNull(authoritativeDnsServerCache, "authoritativeDnsServerCache");
+        this.nameServerComparator = new NameServerComparator(preferredAddressType.addressType());
 
         Bootstrap b = new Bootstrap();
         b.group(executor());
@@ -401,19 +385,14 @@ public class DnsNameResolver extends InetNameResolver {
     /**
      * Provides the opportunity to sort the name servers before following a redirected DNS query.
      * @param hostname the hostname.
-     * @param resolvedNameServers The resolved addresses of the DNS servers which are used in the event of a redirect.
-     * @param unresolvedNameServers The unresolved addresses of the DNS servers which are used in the event of
-     *                              a redirect.
+     * @param nameservers The  addresses of the DNS servers which are used in the event of a redirect. This may
+     *                    contain resolved and unresolved addresses.
      * @return A {@link List} which will be used to follow the DNS redirect.
      */
     protected List<InetSocketAddress> uncachedRedirectDnsServerList(
-            @SuppressWarnings("unused") String hostname, Collection<InetSocketAddress> resolvedNameServers,
-            Collection<InetSocketAddress> unresolvedNameServers) {
-        List<InetSocketAddress> addresses = new ArrayList<InetSocketAddress>(
-                resolvedNameServers.size() + unresolvedNameServers.size());
-        addresses.addAll(resolvedNameServers);
-        addresses.addAll(unresolvedNameServers);
-        return addresses;
+            @SuppressWarnings("unused") String hostname, List<InetSocketAddress> nameservers) {
+        Collections.sort(nameservers, nameServerComparator);
+        return nameservers;
     }
 
     /**

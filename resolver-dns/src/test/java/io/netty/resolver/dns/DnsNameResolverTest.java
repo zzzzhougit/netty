@@ -1550,10 +1550,9 @@ public class DnsNameResolverTest {
 
             @Override
             protected List<InetSocketAddress> uncachedRedirectDnsServerList(
-                    String hostname, Collection<InetSocketAddress> resolvedNameServers,
-                    Collection<InetSocketAddress> unresolvedNameServers) {
+                    String hostname, List<InetSocketAddress> nameservers) {
                 List<InetSocketAddress> nameServers = super.uncachedRedirectDnsServerList(
-                        hostname, resolvedNameServers, unresolvedNameServers);
+                        hostname, nameservers);
                 redirectedRef.set(nameServers);
                 return nameServers;
             }

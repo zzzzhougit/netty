@@ -505,9 +505,8 @@ abstract class DnsResolveContext<T> {
         // Check if we have answers, if not this may be an non authority NS and so redirects must be handled.
         if (res.count(DnsSection.ANSWER) == 0) {
             AuthoritativeNameServerList serverNames = extractAuthoritativeNameServers(question.name(), res);
-
             if (serverNames != null) {
-                Set<InetSocketAddress> resolvedNameServers = parent.newNameServerSet();
+                List<InetSocketAddress> nameServers = new ArrayList<InetSocketAddress>(serverNames.numUnhandled());
                 int additionalCount = res.count(DnsSection.ADDITIONAL);
 
                 for (int i = 0; i < additionalCount; i++) {
@@ -535,32 +534,30 @@ abstract class DnsResolveContext<T> {
                     }
 
                     final InetSocketAddress socketAddress = parent.newRedirectServerAddress(resolved);
-                    resolvedNameServers.add(socketAddress);
+                    nameServers.add(socketAddress);
 
                     addNameServerToCache(authoritativeNameServer, socketAddress, r.timeToLive());
                 }
-                final Set<InetSocketAddress> unresolvedNameServers;
-                if (serverNames.numUnhandled() > 0) {
-                    unresolvedNameServers = new LinkedHashSet<InetSocketAddress>(serverNames.numUnhandled());
 
-                    // Process all unresolved nameservers as well.
+                // Process all unresolved nameservers as well.
+                for (;;) {
                     AuthoritativeNameServer authoritativeNameServer = serverNames.handleNext();
-                    do {
-                        // These will be resolved on the fly if needed.
-                        final InetSocketAddress unresolved = InetSocketAddress.createUnresolved(
-                                authoritativeNameServer.nsName, DefaultDnsServerAddressStreamProvider.DNS_PORT);
-                        unresolvedNameServers.add(unresolved);
 
-                        addNameServerToCache(authoritativeNameServer, unresolved, authoritativeNameServer.timeToLive());
-                    } while ((authoritativeNameServer = serverNames.handleNext()) != null);
-                } else {
-                    unresolvedNameServers = Collections.emptySet();
+                    if (authoritativeNameServer == null) {
+                        break;
+                    }
+                    // These will be resolved on the fly if needed.
+                    final InetSocketAddress unresolved = InetSocketAddress.createUnresolved(
+                            authoritativeNameServer.nsName, DefaultDnsServerAddressStreamProvider.DNS_PORT);
+                    nameServers.add(unresolved);
+
+                    addNameServerToCache(authoritativeNameServer, unresolved, authoritativeNameServer.timeToLive());
                 }
 
-                if (!resolvedNameServers.isEmpty() || !unresolvedNameServers.isEmpty()) {
+                if (!nameServers.isEmpty()) {
                     // Give the user the chance to sort or filter the used servers for the query.
                     List<InetSocketAddress> serverList = parent.uncachedRedirectDnsServerList(
-                            question.name(), resolvedNameServers, unresolvedNameServers);
+                            question.name(), nameServers);
 
                     DnsServerAddressStream serverStream = DnsServerAddresses.sequentialUnresolved(serverList).stream();
                     query(serverStream, 0, question,

@@ -49,7 +49,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -388,13 +387,6 @@ abstract class DnsResolveContext<T> {
         final String nameServerName = PlatformDependent.javaVersion() >= 7 ?
                 nameServerAddr.getHostString() : nameServerAddr.getHostName();
         assert nameServerName != null;
-
-        if (nameServerName.equals(question.name())) {
-            // If the nameserver is the same as what we want to lookup we should skip it.
-            query(nameServerAddrStream, nameServerAddrStreamIndex + 1,
-                    question, queryLifecycleObserver, promise, cause);
-            return;
-        }
 
         // Placeholder so we will not try to finish the original query yet.
         final Future<AddressedEnvelope<DnsResponse, InetSocketAddress>> resolveFuture = parent.executor()

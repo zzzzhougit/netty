@@ -16,22 +16,21 @@
 package io.netty.resolver.dns;
 
 import io.netty.channel.EventLoop;
-import io.netty.util.concurrent.ScheduledFuture;
 import io.netty.util.internal.PlatformDependent;
-import io.netty.util.internal.StringUtil;
 import io.netty.util.internal.UnstableApi;
 
 import java.net.InetSocketAddress;
-import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.RandomAccess;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Delayed;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
 import static io.netty.util.internal.ObjectUtil.checkNotNull;
 import static io.netty.util.internal.ObjectUtil.checkPositiveOrZero;
@@ -45,6 +44,48 @@ public class DefaultAuthoritativeDnsServerCache implements AuthoritativeDnsServe
     // Two years are supported by all our EventLoop implementations and so safe to use as maximum.
     // See also: https://github.com/netty/netty/commit/b47fb817991b42ec8808c7d26538f3f2464e1fa6
     private static final int MAX_SUPPORTED_TTL_SECS = (int) TimeUnit.DAYS.toSeconds(365 * 2);
+
+    private static final ScheduledFuture<?> CANCELLED = new ScheduledFuture<Object>() {
+
+        @Override
+        public boolean cancel(boolean mayInterruptIfRunning) {
+            return false;
+        }
+
+        @Override
+        public long getDelay(TimeUnit unit) {
+            return Long.MIN_VALUE;
+        }
+
+        @Override
+        public int compareTo(Delayed o) {
+            return -1;
+        }
+
+        @Override
+        public boolean isCancelled() {
+            return true;
+        }
+
+        @Override
+        public boolean isDone() {
+            return true;
+        }
+
+        @Override
+        public Object get() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Object get(long timeout, TimeUnit unit) {
+            throw new UnsupportedOperationException();
+        }
+    };
+
+    private static final AtomicReferenceFieldUpdater<DefaultAuthoritativeDnsServerCache.Entries, ScheduledFuture>
+            FUTURE_UPDATER = AtomicReferenceFieldUpdater.newUpdater(
+                    DefaultAuthoritativeDnsServerCache.Entries.class, ScheduledFuture.class, "expirationFuture");
 
     private final ConcurrentMap<String, Entries> resolveCache = PlatformDependent.newConcurrentHashMap();
     private final int minTtl;
@@ -95,10 +136,7 @@ public class DefaultAuthoritativeDnsServerCache implements AuthoritativeDnsServe
         checkNotNull(hostname, "hostname");
 
         Entries entries = resolveCache.get(hostname);
-        if (entries == null) {
-            return Collections.emptyList();
-        }
-        return entries.get();
+        return entries == null ? Collections.<InetSocketAddress>emptyList() : entries.get();
     }
 
     @Override
@@ -115,31 +153,16 @@ public class DefaultAuthoritativeDnsServerCache implements AuthoritativeDnsServe
             return;
         }
 
-        final Entry e = new Entry(address);
-
         Entries entries = resolveCache.get(hostname);
         if (entries == null) {
-            entries = new Entries(e);
+            entries = new Entries(hostname);
             Entries oldEntries = resolveCache.putIfAbsent(hostname, entries);
             if (oldEntries != null) {
                 entries = oldEntries;
             }
         }
 
-        final long ttl;
-        Entry old = entries.add(e);
-        if (old != null) {
-            ScheduledFuture<?> future = old.expirationFuture;
-            if (future != null) {
-                ttl = Math.min(originalTtl, future.getDelay(TimeUnit.SECONDS));
-                future.cancel(false);
-            } else {
-                ttl = originalTtl;
-            }
-        } else {
-            ttl = originalTtl;
-        }
-        scheduleCacheExpiration(hostname, e, Math.max(minTtl, (int) Math.min(maxTtl, ttl)), loop);
+        entries.add(address, Math.max(minTtl, (int) Math.min(maxTtl, originalTtl)), loop);
     }
 
     @Override
@@ -161,148 +184,115 @@ public class DefaultAuthoritativeDnsServerCache implements AuthoritativeDnsServe
         return entries != null && entries.clearAndCancel();
     }
 
-    private void scheduleCacheExpiration(final String hostname, final Entry e, int ttl, EventLoop loop) {
-        e.scheduleExpiration(loop, new Runnable() {
-            @Override
-            public void run() {
-                // We always remove all entries for a hostname once one entry expire. This is not the
-                // most efficient to do but this way we can guarantee that if a DnsResolver
-                // be configured to prefer one ip family over the other we will not return unexpected
-                // results to the enduser if one of the A or AAAA records has different TTL settings.
-                //
-                // As a TTL is just a hint of the maximum time a cache is allowed to cache stuff it's
-                // completely fine to remove the entry even if the TTL is not reached yet.
-                //
-                // See https://github.com/netty/netty/issues/7329
-                Entries entries = resolveCache.remove(hostname);
-                if (entries != null) {
-                    entries.clearAndCancel();
-                }
-            }
-        }, ttl, TimeUnit.SECONDS);
-    }
-
     @Override
     public String toString() {
         return "DefaultAuthoritativeDnsServerCache(minTtl=" + minTtl + ", maxTtl=" + maxTtl + ", cached nameservers=" +
                 resolveCache.size() + ')';
     }
 
-    private static final class Entry {
+    // Directly extend AtomicReference for intrinsics and also to keep memory overhead low.
+    private final class Entries extends AtomicReference<List<InetSocketAddress>> implements Runnable {
 
+        private final String hostname;
+        // Needs to be package-private to be able to access it via the AtomicReferenceFieldUpdater
         volatile ScheduledFuture<?> expirationFuture;
 
-        private final InetSocketAddress address;
-
-        Entry(InetSocketAddress address) {
-            this.address = checkNotNull(address, "address");
+        Entries(String hostname) {
+            super(Collections.<InetSocketAddress>emptyList());
+            this.hostname = hostname;
         }
 
-        InetSocketAddress nameServer() {
-            return address;
-        }
-
-        void scheduleExpiration(EventLoop loop, Runnable task, long delay, TimeUnit unit) {
-            assert expirationFuture == null : "expiration task scheduled already";
-            expirationFuture = loop.schedule(task, delay, unit);
-        }
-
-        void cancelExpiration() {
-            ScheduledFuture<?> expirationFuture = this.expirationFuture;
-            if (expirationFuture != null) {
-                expirationFuture.cancel(false);
-            }
-        }
-
-        @Override
-        public String toString() {
-            return address.toString();
-        }
-    }
-
-    // This List implementation always has RandomAccess semantics as we either wrap an ArrayList, empty List or
-    // one which has only one element.
-    private static final class EntryList extends AbstractList<InetSocketAddress> implements RandomAccess {
-
-        static final EntryList EMPTY = new EntryList(Collections.<Entry>emptyList());
-
-        private final List<Entry> entries;
-
-        EntryList(Entry entry) {
-            this(Collections.singletonList(entry));
-        }
-
-        EntryList(List<Entry> entries) {
-            this.entries = entries;
-        }
-
-        @Override
-        public InetSocketAddress get(int i) {
-            return entries.get(i).address;
-        }
-
-        @Override
-        public int size() {
-            return entries.size();
-        }
-
-        Entry getEntry(int i) {
-            return entries.get(i);
-        }
-
-        boolean cancelExpiration() {
-            final int numEntries = size();
-            if (numEntries == 0) {
-                return false;
-            }
-            for (int i = 0; i < numEntries; i++) {
-                entries.get(i).cancelExpiration();
-            }
-            return true;
-        }
-    }
-
-    // Directly extend AtomicReference for intrinsics and also to keep memory overhead low.
-    private static final class Entries extends AtomicReference<EntryList> {
-
-        Entries(Entry entry) {
-            super(new EntryList(entry));
-        }
-
-        Entry add(Entry e) {
+        void add(InetSocketAddress addr, int ttl, EventLoop loop) {
             for (;;) {
-                EntryList entryList = get();
+                List<InetSocketAddress> entryList = get();
                 if (!entryList.isEmpty()) {
                     // Create a new List for COW semantics
-                    List<Entry> newEntries = new ArrayList<Entry>(entryList.size() + 1);
-                    Entry replacedEntry = null;
+                    List<InetSocketAddress> newEntries = new ArrayList<InetSocketAddress>(entryList.size() + 1);
+                    InetSocketAddress replacedEntry = null;
 
-                    String nameServerName = e.nameServer().getHostName();
-                    for (int i = 0; i < entryList.size(); i++) {
-                        Entry entry = entryList.getEntry(i);
-                        if (!entry.nameServer().getHostName().equalsIgnoreCase(nameServerName)) {
-                            newEntries.add(entry);
+                    String nameServerName = addr.getHostName();
+                    int i = 0;
+                    do {
+                        InetSocketAddress address = entryList.get(i);
+                        if (!address.getHostName().equalsIgnoreCase(nameServerName)) {
+                            newEntries.add(address);
                         } else {
                             // Replace the old entry.
                             assert replacedEntry == null;
-                            replacedEntry = entry;
-                            newEntries.add(e);
+                            replacedEntry = address;
+                            newEntries.add(addr);
                         }
-                    }
+                        i++;
+                    } while (i < entryList.size());
+
                     if (replacedEntry == null) {
-                        newEntries.add(e);
+                        newEntries.add(addr);
                     }
-                    if (compareAndSet(entryList, new EntryList(newEntries))) {
-                        return replacedEntry;
+                    if (compareAndSet(entryList, Collections.unmodifiableList(newEntries))) {
+                        scheduleCacheExpirationIfNeeded(ttl, loop);
+                        return;
                     }
-                } else if (compareAndSet(entryList, new EntryList(e))) {
-                    return null;
+                } else if (compareAndSet(entryList, Collections.singletonList(addr))) {
+                    scheduleCacheExpirationIfNeeded(ttl, loop);
+                    return;
+                }
+            }
+        }
+
+        private void scheduleCacheExpirationIfNeeded(int ttl, EventLoop loop) {
+            for (;;) {
+                ScheduledFuture<?> oldFuture = FUTURE_UPDATER.get(this);
+                if (oldFuture == null || oldFuture.getDelay(TimeUnit.SECONDS) > ttl) {
+                    ScheduledFuture<?> newFuture = loop.schedule(this, ttl, TimeUnit.SECONDS);
+                    // It is possible that
+                    // 1. task will fire in between this line, or
+                    // 2. multiple timers may be set if there is concurrency
+                    // (1) Shouldn't be a problem because we will fail the CAS and then the next loop will see CANCELLED
+                    //     so the ttl will not be less, and we will bail out of the loop.
+                    // (2) This is a trade-off to avoid concurrency resulting in contention on a synchronized block.
+                    if (FUTURE_UPDATER.compareAndSet(this, oldFuture, newFuture)) {
+                        if (oldFuture != null) {
+                            oldFuture.cancel(true);
+                        }
+                        break;
+                    } else {
+                        // There was something else scheduled in the meantime... Cancel and try again.
+                        newFuture.cancel(true);
+                    }
+                } else {
+                    break;
                 }
             }
         }
 
         boolean clearAndCancel() {
-            return getAndSet(EntryList.EMPTY).cancelExpiration();
+            List<InetSocketAddress> entries = getAndSet(Collections.<InetSocketAddress>emptyList());
+            if (entries.isEmpty()) {
+                return false;
+            }
+
+            ScheduledFuture<?> expirationFuture = FUTURE_UPDATER.getAndSet(this, CANCELLED);
+            if (expirationFuture != null) {
+                expirationFuture.cancel(false);
+            }
+
+            return true;
+        }
+
+        @Override
+        public void run() {
+            // We always remove all entries for a hostname once one entry expire. This is not the
+            // most efficient to do but this way we can guarantee that if a DnsResolver
+            // be configured to prefer one ip family over the other we will not return unexpected
+            // results to the enduser if one of the A or AAAA records has different TTL settings.
+            //
+            // As a TTL is just a hint of the maximum time a cache is allowed to cache stuff it's
+            // completely fine to remove the entry even if the TTL is not reached yet.
+            //
+            // See https://github.com/netty/netty/issues/7329
+            resolveCache.remove(hostname, this);
+
+            clearAndCancel();
         }
     }
 }

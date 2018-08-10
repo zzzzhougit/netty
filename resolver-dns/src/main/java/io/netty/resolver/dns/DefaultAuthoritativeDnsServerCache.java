@@ -94,7 +94,7 @@ public class DefaultAuthoritativeDnsServerCache implements AuthoritativeDnsServe
     public List<InetSocketAddress> get(String hostname) {
         checkNotNull(hostname, "hostname");
 
-        Entries entries = resolveCache.get(appendDot(hostname));
+        Entries entries = resolveCache.get(hostname);
         if (entries == null) {
             return Collections.emptyList();
         }
@@ -117,11 +117,10 @@ public class DefaultAuthoritativeDnsServerCache implements AuthoritativeDnsServe
 
         final Entry e = new Entry(address);
 
-        String key = appendDot(hostname);
-        Entries entries = resolveCache.get(key);
+        Entries entries = resolveCache.get(hostname);
         if (entries == null) {
             entries = new Entries(e);
-            Entries oldEntries = resolveCache.putIfAbsent(key, entries);
+            Entries oldEntries = resolveCache.putIfAbsent(hostname, entries);
             if (oldEntries != null) {
                 entries = oldEntries;
             }
@@ -140,7 +139,7 @@ public class DefaultAuthoritativeDnsServerCache implements AuthoritativeDnsServe
         } else {
             ttl = originalTtl;
         }
-        scheduleCacheExpiration(key, e, Math.max(minTtl, (int) Math.min(maxTtl, ttl)), loop);
+        scheduleCacheExpiration(hostname, e, Math.max(minTtl, (int) Math.min(maxTtl, ttl)), loop);
     }
 
     @Override
@@ -158,7 +157,7 @@ public class DefaultAuthoritativeDnsServerCache implements AuthoritativeDnsServe
     @Override
     public boolean clear(String hostname) {
         checkNotNull(hostname, "hostname");
-        Entries entries = resolveCache.remove(appendDot(hostname));
+        Entries entries = resolveCache.remove(hostname);
         return entries != null && entries.clearAndCancel();
     }
 
@@ -305,9 +304,5 @@ public class DefaultAuthoritativeDnsServerCache implements AuthoritativeDnsServe
         boolean clearAndCancel() {
             return getAndSet(EntryList.EMPTY).cancelExpiration();
         }
-    }
-
-    private static String appendDot(String hostname) {
-        return StringUtil.endsWith(hostname, '.') ? hostname : hostname + '.';
     }
 }

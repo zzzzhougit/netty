@@ -233,9 +233,7 @@ public class DefaultDnsCache implements DnsCache {
     private final class Entries extends AtomicReference<List<DefaultDnsCacheEntry>> implements Runnable {
 
         private final String hostname;
-
-        // This is guarded by a synchronized block.
-        private ScheduledFuture<?> expirationFuture;
+        private volatile ScheduledFuture<?> expirationFuture;
 
         Entries(String hostname) {
             super(Collections.<DefaultDnsCacheEntry>emptyList());

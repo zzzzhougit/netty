@@ -17,7 +17,6 @@ package io.netty.resolver.dns;
 
 import io.netty.channel.EventLoop;
 import io.netty.handler.codec.dns.DnsRecord;
-import io.netty.util.concurrent.ScheduledFuture;
 import io.netty.util.internal.PlatformDependent;
 import io.netty.util.internal.StringUtil;
 import io.netty.util.internal.UnstableApi;
@@ -29,8 +28,11 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Delayed;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
 import static io.netty.util.internal.ObjectUtil.checkNotNull;
 import static io.netty.util.internal.ObjectUtil.checkPositiveOrZero;
@@ -41,12 +43,53 @@ import static io.netty.util.internal.ObjectUtil.checkPositiveOrZero;
  */
 @UnstableApi
 public class DefaultDnsCache implements DnsCache {
-
-    private final ConcurrentMap<String, Entries> resolveCache = PlatformDependent.newConcurrentHashMap();
-
     // Two years are supported by all our EventLoop implementations and so safe to use as maximum.
     // See also: https://github.com/netty/netty/commit/b47fb817991b42ec8808c7d26538f3f2464e1fa6
     private static final int MAX_SUPPORTED_TTL_SECS = (int) TimeUnit.DAYS.toSeconds(365 * 2);
+
+    private static final ScheduledFuture<?> CANCELLED = new ScheduledFuture<Object>() {
+
+        @Override
+        public boolean cancel(boolean mayInterruptIfRunning) {
+            return false;
+        }
+
+        @Override
+        public long getDelay(TimeUnit unit) {
+            return Long.MIN_VALUE;
+        }
+
+        @Override
+        public int compareTo(Delayed o) {
+            return -1;
+        }
+
+        @Override
+        public boolean isCancelled() {
+            return true;
+        }
+
+        @Override
+        public boolean isDone() {
+            return true;
+        }
+
+        @Override
+        public Object get() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Object get(long timeout, TimeUnit unit) {
+            throw new UnsupportedOperationException();
+        }
+    };
+
+    private static final AtomicReferenceFieldUpdater<DefaultDnsCache.Entries, ScheduledFuture> FUTURE_UPDATER =
+            AtomicReferenceFieldUpdater.newUpdater(
+                    DefaultDnsCache.Entries.class, ScheduledFuture.class, "expirationFuture");
+
+    private final ConcurrentMap<String, Entries> resolveCache = PlatformDependent.newConcurrentHashMap();
     private final int minTtl;
     private final int maxTtl;
     private final int negativeTtl;
@@ -233,7 +276,8 @@ public class DefaultDnsCache implements DnsCache {
     private final class Entries extends AtomicReference<List<DefaultDnsCacheEntry>> implements Runnable {
 
         private final String hostname;
-        private volatile ScheduledFuture<?> expirationFuture;
+        // Needs to be package-private to be able to access it via the AtomicReferenceFieldUpdater
+        volatile ScheduledFuture<?> expirationFuture;
 
         Entries(String hostname) {
             super(Collections.<DefaultDnsCacheEntry>emptyList());
@@ -261,7 +305,8 @@ public class DefaultDnsCache implements DnsCache {
                         // Create a new List for COW semantics
                         List<DefaultDnsCacheEntry> newEntries = new ArrayList<DefaultDnsCacheEntry>(entries.size() + 1);
                         DefaultDnsCacheEntry replacedEntry = null;
-                        for (int i = 0; i < entries.size(); i++) {
+                        int i = 0;
+                        do {
                             DefaultDnsCacheEntry entry = entries.get(i);
                             // Only add old entry if the address is not the same as the one we try to add as well.
                             // In this case we will skip it and just add the new entry as this may have
@@ -272,9 +317,10 @@ public class DefaultDnsCache implements DnsCache {
                                 assert replacedEntry == null;
                                 replacedEntry = entry;
                             }
-                        }
+                            i++;
+                        } while (i < entries.size());
                         newEntries.add(e);
-                        if (compareAndSet(entries, newEntries)) {
+                        if (compareAndSet(entries, Collections.unmodifiableList(newEntries))) {
                             if (replacedEntry != null) {
                                 // We don't care if the replaced entry may have had a smaller TTL. At worse we will
                                 // clear the cache a bit to early which is fine as the TTL is just the maximum time
@@ -296,18 +342,28 @@ public class DefaultDnsCache implements DnsCache {
         }
 
         private void scheduleCacheExpirationIfNeeded(int ttl, EventLoop loop) {
-            ScheduledFuture<?> oldScheduled;
-
-            synchronized (this) {
-                oldScheduled = this.expirationFuture;
-                if (oldScheduled == null || oldScheduled.getDelay(TimeUnit.SECONDS) > ttl) {
-                    this.expirationFuture = loop.schedule(this, ttl, TimeUnit.SECONDS);
+            for (;;) {
+                ScheduledFuture<?> oldFuture = FUTURE_UPDATER.get(this);
+                if (oldFuture == null || oldFuture.getDelay(TimeUnit.SECONDS) > ttl) {
+                    ScheduledFuture<?> newFuture = loop.schedule(this, ttl, TimeUnit.SECONDS);
+                    // It is possible that
+                    // 1. task will fire in between this line, or
+                    // 2. multiple timers may be set if there is concurrency
+                    // (1) Shouldn't be a problem because we will fail the CAS and then the next loop will see CANCELLED
+                    //     so the ttl will not be less, and we will bail out of the loop.
+                    // (2) This is a trade-off to avoid concurrency resulting in contention on a synchronized block.
+                    if (FUTURE_UPDATER.compareAndSet(this, oldFuture, newFuture)) {
+                         if (oldFuture != null) {
+                            oldFuture.cancel(true);
+                         }
+                         break;
+                    } else {
+                        // There was something else scheduled in the meantime... Cancel and try again.
+                       newFuture.cancel(true);
+                    }
                 } else {
-                    oldScheduled = null;
+                    break;
                 }
-            }
-            if (oldScheduled != null) {
-                oldScheduled.cancel(false);
             }
         }
 
@@ -317,7 +373,7 @@ public class DefaultDnsCache implements DnsCache {
                 return false;
             }
 
-            ScheduledFuture<?> expirationFuture = this.expirationFuture;
+            ScheduledFuture<?> expirationFuture = FUTURE_UPDATER.getAndSet(this, CANCELLED);
             if (expirationFuture != null) {
                 expirationFuture.cancel(false);
             }

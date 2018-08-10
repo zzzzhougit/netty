@@ -583,7 +583,7 @@ abstract class DnsResolveContext<T> {
         for (int i = 0; i < authorityCount; i++) {
             serverNames.add(res.recordAt(DnsSection.AUTHORITY, i));
         }
-        return serverNames;
+        return serverNames.numUnhandled() > 0 ? serverNames : null;
     }
 
     private void onExpectedResponse(

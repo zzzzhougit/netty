@@ -70,8 +70,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Set;
-import java.util.TreeSet;
 
 import static io.netty.resolver.dns.DefaultDnsServerAddressStreamProvider.DNS_PORT;
 import static io.netty.resolver.dns.UnixResolverDnsServerAddressStreamProvider.parseEtcResolverFirstNdots;
@@ -1028,10 +1026,6 @@ public class DnsNameResolver extends InetNameResolver {
 
     final DnsServerAddressStream newNameServerAddressStream(String hostname) {
         return dnsServerAddressStreamProvider.nameServerAddressStream(hostname);
-    }
-
-    final Set<InetSocketAddress> newNameServerSet() {
-        return new TreeSet<InetSocketAddress>(nameServerComparator);
     }
 
     private final class DnsResponseHandler extends ChannelInboundHandlerAdapter {

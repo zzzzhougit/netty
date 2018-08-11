@@ -44,6 +44,7 @@ import io.netty.util.internal.ThrowableUtil;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
+import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -52,11 +53,11 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Set;
 
 import static io.netty.resolver.dns.DnsAddressDecoder.decodeAddress;
 import static java.lang.Math.min;
-import static java.util.Collections.unmodifiableList;
 
 abstract class DnsResolveContext<T> {
 
@@ -295,11 +296,11 @@ abstract class DnsResolveContext<T> {
             }
             idx = idx2;
 
-            List<InetSocketAddress> entries = authoritativeDnsServerCache().get(hostname);
-            if (!entries.isEmpty()) {
+            DnsServerAddressStream entries = authoritativeDnsServerCache().get(hostname);
+            if (entries != null) {
                 // The returned List may contain unresolved InetSocketAddress instances that will be
                 // resolved on the fly in query(....).
-                return DnsServerAddresses.sequentialUnresolved(entries).stream();
+                return entries;
             }
         }
     }
@@ -420,10 +421,10 @@ abstract class DnsResolveContext<T> {
                     parent.newNameServerAddressStream(nameServerName),
                     resolveCache(), new AuthoritativeDnsServerCache() {
                 @Override
-                public List<InetSocketAddress> get(String hostname) {
+                public DnsServerAddressStream get(String hostname) {
                     // To not risk falling into any loop, we will not use the cache while following redirects but only
                     // on the initial query.
-                    return Collections.emptyList();
+                    return null;
                 }
 
                 @Override
@@ -548,17 +549,72 @@ abstract class DnsResolveContext<T> {
 
                 if (!nameServers.isEmpty()) {
                     // Give the user the chance to sort or filter the used servers for the query.
-                    List<InetSocketAddress> serverList = parent.uncachedRedirectDnsServerList(
+                    DnsServerAddressStream serverList = parent.uncachedRedirectDnsServerStream(
                             question.name(), nameServers);
-
-                    DnsServerAddressStream serverStream = DnsServerAddresses.sequentialUnresolved(serverList).stream();
-                    query(serverStream, 0, question,
-                            queryLifecycleObserver.queryRedirected(unmodifiableList(serverList)), promise, null);
-                    return true;
+                    if (serverList != null) {
+                        query(serverList, 0, question,
+                              queryLifecycleObserver.queryRedirected(new DnsAddressStreamList(serverList)),
+                              promise, null);
+                        return true;
+                    }
                 }
             }
         }
         return false;
+    }
+
+    private static final class DnsAddressStreamList extends AbstractList<InetSocketAddress> {
+
+        private final DnsServerAddressStream duplicate;
+        private List<InetSocketAddress> addresses;
+
+        DnsAddressStreamList(DnsServerAddressStream stream) {
+            duplicate = stream.duplicate();
+        }
+
+        @Override
+        public InetSocketAddress get(int index) {
+            if (addresses == null) {
+                DnsServerAddressStream stream = duplicate.duplicate();
+                addresses = new ArrayList<InetSocketAddress>(size());
+                for (int i = 0; i < stream.size(); i++) {
+                    addresses.add(stream.next());
+                }
+            }
+            return addresses.get(index);
+        }
+
+        @Override
+        public int size() {
+            return duplicate.size();
+        }
+
+        @Override
+        public Iterator<InetSocketAddress> iterator() {
+            return new Iterator<InetSocketAddress>() {
+                private final DnsServerAddressStream stream = duplicate.duplicate();
+                private int i;
+
+                @Override
+                public boolean hasNext() {
+                    return i < stream.size();
+                }
+
+                @Override
+                public InetSocketAddress next() {
+                    if (!hasNext()) {
+                        throw new NoSuchElementException();
+                    }
+                    i++;
+                    return stream.next();
+                }
+
+                @Override
+                public void remove() {
+                    throw new UnsupportedOperationException();
+                }
+            };
+        }
     }
 
     /**

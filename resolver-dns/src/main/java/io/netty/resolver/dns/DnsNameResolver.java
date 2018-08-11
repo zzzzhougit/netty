@@ -385,14 +385,16 @@ public class DnsNameResolver extends InetNameResolver {
     /**
      * Provides the opportunity to sort the name servers before following a redirected DNS query.
      * @param hostname the hostname.
-     * @param nameservers The  addresses of the DNS servers which are used in the event of a redirect. This may
-     *                    contain resolved and unresolved addresses.
-     * @return A {@link List} which will be used to follow the DNS redirect.
+     * @param nameservers The addresses of the DNS servers which are used in the event of a redirect. This may
+     *                    contain resolved and unresolved addresses so the used {@link DnsServerAddressStream} must
+     *                    allow unresolved addresses if you want to include these as well.
+     * @return A {@link DnsServerAddressStream} which will be used to follow the DNS redirect or {@code null} if
+     *         none should be followed.
      */
-    protected List<InetSocketAddress> uncachedRedirectDnsServerList(
+    protected DnsServerAddressStream uncachedRedirectDnsServerStream(
             @SuppressWarnings("unused") String hostname, List<InetSocketAddress> nameservers) {
         Collections.sort(nameservers, nameServerComparator);
-        return nameservers;
+        return new SequentialDnsServerAddressStream(nameservers, 0);
     }
 
     /**

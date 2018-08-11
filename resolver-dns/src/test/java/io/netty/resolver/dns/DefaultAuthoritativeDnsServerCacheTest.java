@@ -50,7 +50,7 @@ public class DefaultAuthoritativeDnsServerCacheTest {
                 @Override
                 public Throwable call() {
                     try {
-                        assertTrue(cache.get("netty.io").isEmpty());
+                        assertNull(cache.get("netty.io"));
                         return null;
                     } catch (Throwable cause) {
                         return cause;
@@ -98,10 +98,10 @@ public class DefaultAuthoritativeDnsServerCacheTest {
             cache.cache("netty.io", resolved1, 100, loop);
             cache.cache("netty.io", resolved2, 10000, loop);
 
-            List<InetSocketAddress> entries = cache.get("netty.io");
+            DnsServerAddressStream entries = cache.get("netty.io");
             assertEquals(2, entries.size());
-            assertEquals(entries.get(0), resolved1);
-            assertEquals(entries.get(1), resolved2);
+            assertEquals(resolved1, entries.next());
+            assertEquals(resolved2, entries.next());
         } finally {
             group.shutdownGracefully();
         }
@@ -122,17 +122,17 @@ public class DefaultAuthoritativeDnsServerCacheTest {
             cache.cache("netty.io", unresolved, 100, loop);
             cache.cache("netty.io", resolved1, 10000, loop);
 
-            List<InetSocketAddress> entries = cache.get("netty.io");
+            DnsServerAddressStream entries = cache.get("netty.io");
             assertEquals(2, entries.size());
-            assertEquals(unresolved, entries.get(0));
-            assertEquals(resolved1, entries.get(1));
+            assertEquals(unresolved, entries.next());
+            assertEquals(resolved1, entries.next());
 
             cache.cache("netty.io", resolved2, 100, loop);
-            List<InetSocketAddress> entries2 = cache.get("netty.io");
+            DnsServerAddressStream entries2 = cache.get("netty.io");
 
             assertEquals(2, entries2.size());
-            assertEquals(resolved2, entries2.get(0));
-            assertEquals(resolved1, entries2.get(1));
+            assertEquals(resolved2, entries2.next());
+            assertEquals(resolved1, entries2.next());
         } finally {
             group.shutdownGracefully();
         }

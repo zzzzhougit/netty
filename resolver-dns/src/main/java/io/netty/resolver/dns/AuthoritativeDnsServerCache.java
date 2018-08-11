@@ -19,7 +19,6 @@ import io.netty.channel.EventLoop;
 import io.netty.util.internal.UnstableApi;
 
 import java.net.InetSocketAddress;
-import java.util.List;
 
 /**
  * Cache which stores the nameservers that should be used to resolve a specific hostname.
@@ -28,14 +27,14 @@ import java.util.List;
 public interface AuthoritativeDnsServerCache {
 
     /**
-     * Returns the cached nameservers that should be used to resolve the given hostname. The returned unmodifiable
-     * {@link List} may contain unresolved {@link InetSocketAddress}es that will be resolved when needed while
-     * resolving other domain names.
+     * Returns the cached nameservers that should be used to resolve the given hostname. The returned
+     * {@link DnsServerAddressStream} may contain unresolved {@link InetSocketAddress}es that will be resolved
+     * when needed while resolving other domain names.
      *
      * @param hostname the hostname
-     * @return the cached entries or an empty {@link List} if none.
+     * @return the cached entries or an {@code null} if none.
      */
-    List<InetSocketAddress> get(String hostname);
+    DnsServerAddressStream get(String hostname);
 
     /**
      * Caches a nameserver that should be used to resolve the given hostname.

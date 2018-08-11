@@ -17,13 +17,14 @@
 package io.netty.resolver.dns;
 
 import java.net.InetSocketAddress;
+import java.util.List;
 
 final class SequentialDnsServerAddressStream implements DnsServerAddressStream {
 
-    private final InetSocketAddress[] addresses;
+    private final List<InetSocketAddress> addresses;
     private int i;
 
-    SequentialDnsServerAddressStream(InetSocketAddress[] addresses, int startIdx) {
+    SequentialDnsServerAddressStream(List<InetSocketAddress> addresses, int startIdx) {
         this.addresses = addresses;
         i = startIdx;
     }
@@ -31,8 +32,8 @@ final class SequentialDnsServerAddressStream implements DnsServerAddressStream {
     @Override
     public InetSocketAddress next() {
         int i = this.i;
-        InetSocketAddress next = addresses[i];
-        if (++ i < addresses.length) {
+        InetSocketAddress next = addresses.get(i);
+        if (++ i < addresses.size()) {
             this.i = i;
         } else {
             this.i = 0;
@@ -42,7 +43,7 @@ final class SequentialDnsServerAddressStream implements DnsServerAddressStream {
 
     @Override
     public int size() {
-        return addresses.length;
+        return addresses.size();
     }
 
     @Override
@@ -52,7 +53,7 @@ final class SequentialDnsServerAddressStream implements DnsServerAddressStream {
 
     @Override
     public String toString() {
-        return toString("sequential", i, addresses);
+        return toString("sequential", i, addresses.toArray(new InetSocketAddress[0]));
     }
 
     static String toString(String type, int index, InetSocketAddress[] addresses) {

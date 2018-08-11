@@ -70,7 +70,6 @@ import java.net.UnknownHostException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -1296,16 +1295,16 @@ public class DnsNameResolverTest {
             QuerySucceededEvent succeededEvent = (QuerySucceededEvent) observer.events.poll();
 
             if (cache) {
-                assertTrue(nsCache.cache.get("io.").isEmpty());
-                assertTrue(nsCache.cache.get("netty.io.").isEmpty());
-                List<InetSocketAddress> entries = nsCache.cache.get("record.netty.io.");
+                assertNull(nsCache.cache.get("io."));
+                assertNull(nsCache.cache.get("netty.io."));
+                DnsServerAddressStream entries = nsCache.cache.get("record.netty.io.");
 
                 // First address should be resolved (as we received a matching additional record), second is unresolved.
                 assertEquals(2, entries.size());
-                assertFalse(entries.get(0).isUnresolved());
-                assertTrue(entries.get(1).isUnresolved());
+                assertFalse(entries.next().isUnresolved());
+                assertTrue(entries.next().isUnresolved());
 
-                assertTrue(nsCache.cache.get(hostname).isEmpty());
+                assertNull(nsCache.cache.get(hostname));
 
                 // Test again via cache.
                 resolver.resolveAll(hostname).syncUninterruptibly();
@@ -1332,7 +1331,7 @@ public class DnsNameResolverTest {
 
                 // Check that it only queried the cache for record.netty.io.
                 assertNull(nsCache.cacheHits.get("io."));
-                assertTrue(nsCache.cacheHits.get("netty.io.").isEmpty());
+                assertNull(nsCache.cacheHits.get("netty.io."));
                 assertNotNull(nsCache.cacheHits.get("record.netty.io."));
                 assertNull(nsCache.cacheHits.get("some.record.netty.io."));
             }
@@ -1456,7 +1455,7 @@ public class DnsNameResolverTest {
             assertEquals(expected, resolved2.get(0));
 
             if (authoritativeDnsServerCache != NoopAuthoritativeDnsServerCache.INSTANCE) {
-                List<InetSocketAddress> cached = authoritativeDnsServerCache.get(domain + '.');
+                DnsServerAddressStream cached = authoritativeDnsServerCache.get(domain + '.');
                 assertEquals(2, cached.size());
                 InetSocketAddress ns1Address = InetSocketAddress.createUnresolved(
                         ns1Name + '.', DefaultDnsServerAddressStreamProvider.DNS_PORT);
@@ -1464,11 +1463,11 @@ public class DnsNameResolverTest {
                         ns2Name + '.', DefaultDnsServerAddressStreamProvider.DNS_PORT);
 
                 if (invalidNsFirst) {
-                    assertEquals(ns2Address, cached.get(0));
-                    assertEquals(ns1Address, cached.get(1));
+                    assertEquals(ns2Address, cached.next());
+                    assertEquals(ns1Address, cached.next());
                 } else {
-                    assertEquals(ns1Address, cached.get(0));
-                    assertEquals(ns2Address, cached.get(1));
+                    assertEquals(ns1Address, cached.next());
+                    assertEquals(ns2Address, cached.next());
                 }
             }
             if (cache != NoopDnsCache.INSTANCE) {
@@ -1538,7 +1537,7 @@ public class DnsNameResolverTest {
         redirectServer.start();
         EventLoopGroup group = new NioEventLoopGroup(1);
 
-        final AtomicReference<List<InetSocketAddress>> redirectedRef = new AtomicReference<List<InetSocketAddress>>();
+        final AtomicReference<DnsServerAddressStream> redirectedRef = new AtomicReference<DnsServerAddressStream>();
         final DnsNameResolver resolver = new DnsNameResolver(
                 group.next(), new ReflectiveChannelFactory<DatagramChannel>(NioDatagramChannel.class),
                 NoopDnsCache.INSTANCE, NoopAuthoritativeDnsServerCache.INSTANCE,
@@ -1549,11 +1548,11 @@ public class DnsNameResolverTest {
                 DnsNameResolver.DEFAULT_SEARCH_DOMAINS, 0, true) {
 
             @Override
-            protected List<InetSocketAddress> uncachedRedirectDnsServerList(
+            protected DnsServerAddressStream uncachedRedirectDnsServerStream(
                     String hostname, List<InetSocketAddress> nameservers) {
-                List<InetSocketAddress> nameServers = super.uncachedRedirectDnsServerList(
+                DnsServerAddressStream nameServers = super.uncachedRedirectDnsServerStream(
                         hostname, nameservers);
-                redirectedRef.set(nameServers);
+                redirectedRef.set(nameServers.duplicate());
                 return nameServers;
             }
         };
@@ -1561,11 +1560,11 @@ public class DnsNameResolverTest {
         try {
             Throwable cause = resolver.resolveAll(hostname).await().cause();
             assertTrue(cause instanceof UnknownHostException);
-            List<InetSocketAddress> redirected = redirectedRef.get();
+            DnsServerAddressStream redirected = redirectedRef.get();
             assertNotNull(redirected);
             assertEquals(2, redirected.size());
-            assertEquals(ns1Address, redirected.get(0));
-            assertEquals(ns2Address, redirected.get(1));
+            assertEquals(ns1Address, redirected.next());
+            assertEquals(ns2Address, redirected.next());
         } finally {
             resolver.close();
             group.shutdownGracefully(0, 0, TimeUnit.SECONDS);
@@ -1719,7 +1718,7 @@ public class DnsNameResolverTest {
 
     private static final class TestAuthoritativeDnsServerCache implements AuthoritativeDnsServerCache {
         final AuthoritativeDnsServerCache cache;
-        final Map<String, List<InetSocketAddress>> cacheHits = new HashMap<String, List<InetSocketAddress>>();
+        final Map<String, DnsServerAddressStream> cacheHits = new HashMap<String, DnsServerAddressStream>();
 
         TestAuthoritativeDnsServerCache(AuthoritativeDnsServerCache cache) {
             this.cache = cache;
@@ -1736,9 +1735,11 @@ public class DnsNameResolverTest {
         }
 
         @Override
-        public List<InetSocketAddress> get(String hostname) {
-            List<InetSocketAddress> cached = cache.get(hostname);
-            cacheHits.put(hostname, cached);
+        public DnsServerAddressStream get(String hostname) {
+            DnsServerAddressStream cached = cache.get(hostname);
+            if (cached != null) {
+                cacheHits.put(hostname, cached.duplicate());
+            }
             return cached;
         }
 

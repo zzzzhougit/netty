@@ -22,7 +22,6 @@ import io.netty.util.internal.UnstableApi;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 import static io.netty.util.internal.ObjectUtil.checkNotNull;
@@ -42,13 +41,13 @@ final class AuthoritativeDnsServerCacheAdapter implements AuthoritativeDnsServer
     }
 
     @Override
-    public List<InetSocketAddress> get(String hostname) {
+    public DnsServerAddressStream get(String hostname) {
         List<? extends DnsCacheEntry> entries = cache.get(hostname, EMPTY);
         if (entries == null || entries.isEmpty()) {
-            return Collections.emptyList();
+            return null;
         }
         if (entries.get(0).cause() != null) {
-            return Collections.emptyList();
+            return null;
         }
 
         List<InetSocketAddress> addresses = new ArrayList<InetSocketAddress>(entries.size());
@@ -57,9 +56,8 @@ final class AuthoritativeDnsServerCacheAdapter implements AuthoritativeDnsServer
         do {
             InetAddress addr = entries.get(i).address();
             addresses.add(new InetSocketAddress(addr, DefaultDnsServerAddressStreamProvider.DNS_PORT));
-            i++;
-        } while (i < entries.size());
-        return addresses;
+        } while (++i < entries.size());
+        return new SequentialDnsServerAddressStream(addresses, 0);
     }
 
     @Override

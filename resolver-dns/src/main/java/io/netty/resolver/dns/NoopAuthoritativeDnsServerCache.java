@@ -32,8 +32,8 @@ public final class NoopAuthoritativeDnsServerCache implements AuthoritativeDnsSe
     private NoopAuthoritativeDnsServerCache() { }
 
     @Override
-    public List<InetSocketAddress> get(String hostname) {
-        return Collections.emptyList();
+    public DnsServerAddressStream get(String hostname) {
+        return null;
     }
 
     @Override

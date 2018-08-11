@@ -135,11 +135,15 @@ public class DefaultAuthoritativeDnsServerCache implements AuthoritativeDnsServe
     }
 
     @Override
-    public List<InetSocketAddress> get(String hostname) {
+    public DnsServerAddressStream get(String hostname) {
         checkNotNull(hostname, "hostname");
 
         Entries entries = resolveCache.get(hostname);
-        return entries == null ? Collections.<InetSocketAddress>emptyList() : entries.get();
+        if (entries == null) {
+            return null;
+        }
+        List<InetSocketAddress> addresses = entries.get();
+        return addresses.isEmpty() ? null : new SequentialDnsServerAddressStream(addresses, 0);
     }
 
     @Override

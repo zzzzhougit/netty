@@ -329,7 +329,7 @@ abstract class DnsResolveContext<T> {
         final InetSocketAddress nameServerAddr = nameServerAddrStream.next();
         if (nameServerAddr.isUnresolved()) {
             queryUnresolvedNameserver(nameServerAddr, nameServerAddrStream, nameServerAddrStreamIndex, question,
-                    queryLifecycleObserver, promise, cause);
+                                      queryLifecycleObserver, promise, cause);
             return;
         }
         final ChannelPromise writePromise = parent.ch.newPromise();
@@ -361,7 +361,7 @@ abstract class DnsResolveContext<T> {
                 try {
                     if (queryCause == null) {
                         onResponse(nameServerAddrStream, nameServerAddrStreamIndex, question, future.getNow(),
-                                queryLifecycleObserver, promise);
+                                   queryLifecycleObserver, promise);
                     } else {
                         // Server did not respond or I/O error occurred; try again.
                         queryLifecycleObserver.queryFailed(queryCause);
@@ -406,11 +406,11 @@ abstract class DnsResolveContext<T> {
                     DnsServerAddressStream addressStream = new CombinedDnsServerAddressStream(
                             nameServerAddr, resolvedAddresses, nameServerAddrStream);
                     query(addressStream, nameServerAddrStreamIndex, question,
-                            queryLifecycleObserver, promise, cause);
+                          queryLifecycleObserver, promise, cause);
                 } else {
                     // Ignore the server and try the next one...
                     query(nameServerAddrStream, nameServerAddrStreamIndex + 1,
-                            question, queryLifecycleObserver, promise, cause);
+                          question, queryLifecycleObserver, promise, cause);
                 }
             }
         });
@@ -418,8 +418,8 @@ abstract class DnsResolveContext<T> {
                 parent.resolvedInternetProtocolFamiliesUnsafe())) {
             final AuthoritativeDnsServerCache authoritativeDnsServerCache = authoritativeDnsServerCache();
             new DnsAddressResolveContext(parent, nameServerName, additionals,
-                    parent.newNameServerAddressStream(nameServerName),
-                    resolveCache(), new AuthoritativeDnsServerCache() {
+                                         parent.newNameServerAddressStream(nameServerName),
+                                         resolveCache(), new AuthoritativeDnsServerCache() {
                 @Override
                 public DnsServerAddressStream get(String hostname) {
                     // To not risk falling into any loop, we will not use the cache while following redirects but only
@@ -446,9 +446,9 @@ abstract class DnsResolveContext<T> {
     }
 
     private void onResponse(final DnsServerAddressStream nameServerAddrStream, final int nameServerAddrStreamIndex,
-                    final DnsQuestion question, AddressedEnvelope<DnsResponse, InetSocketAddress> envelope,
-                    final DnsQueryLifecycleObserver queryLifecycleObserver,
-                    Promise<List<T>> promise) {
+                            final DnsQuestion question, AddressedEnvelope<DnsResponse, InetSocketAddress> envelope,
+                            final DnsQueryLifecycleObserver queryLifecycleObserver,
+                            Promise<List<T>> promise) {
         try {
             final DnsResponse res = envelope.content();
             final DnsResponseCode code = res.code();
@@ -508,7 +508,7 @@ abstract class DnsResolveContext<T> {
                     final String recordName = r.name();
 
                     if (r.type() == DnsRecordType.A && !parent.supportsARecords() ||
-                            r.type() == DnsRecordType.AAAA && !parent.supportsAAAARecords()) {
+                        r.type() == DnsRecordType.AAAA && !parent.supportsAAAARecords()) {
                         continue;
                     }
 
@@ -766,11 +766,11 @@ abstract class DnsResolveContext<T> {
     }
 
     private void tryToFinishResolve(final DnsServerAddressStream nameServerAddrStream,
-                            final int nameServerAddrStreamIndex,
-                            final DnsQuestion question,
-                            final DnsQueryLifecycleObserver queryLifecycleObserver,
-                            final Promise<List<T>> promise,
-                            final Throwable cause) {
+                                    final int nameServerAddrStreamIndex,
+                                    final DnsQuestion question,
+                                    final DnsQueryLifecycleObserver queryLifecycleObserver,
+                                    final Promise<List<T>> promise,
+                                    final Throwable cause) {
 
         // There are no queries left to try.
         if (!queriesInProgress.isEmpty()) {
@@ -923,7 +923,7 @@ abstract class DnsResolveContext<T> {
             this.replaced = replaced;
             this.resolvedAddresses = resolvedAddresses;
             this.originalStream = originalStream;
-            this.resolved = resolvedAddresses.iterator();
+            resolved = resolvedAddresses.iterator();
         }
 
         @Override

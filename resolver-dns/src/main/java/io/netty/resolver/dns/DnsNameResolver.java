@@ -241,10 +241,10 @@ public class DnsNameResolver extends InetNameResolver {
             int ndots,
             boolean decodeIdn) {
         this(eventLoop, channelFactory, resolveCache,
-                new AuthoritativeDnsServerCacheAdapter(authoritativeDnsServerCache), dnsQueryLifecycleObserverFactory,
-                queryTimeoutMillis, resolvedAddressTypes, recursionDesired, maxQueriesPerResolve, traceEnabled,
-                maxPayloadSize, optResourceEnabled, hostsFileEntriesResolver, dnsServerAddressStreamProvider,
-                searchDomains, ndots, decodeIdn);
+             new AuthoritativeDnsServerCacheAdapter(authoritativeDnsServerCache), dnsQueryLifecycleObserverFactory,
+             queryTimeoutMillis, resolvedAddressTypes, recursionDesired, maxQueriesPerResolve, traceEnabled,
+             maxPayloadSize, optResourceEnabled, hostsFileEntriesResolver, dnsServerAddressStreamProvider,
+             searchDomains, ndots, decodeIdn);
     }
 
     /**
@@ -305,7 +305,7 @@ public class DnsNameResolver extends InetNameResolver {
                 dnsQueryLifecycleObserverFactory instanceof NoopDnsQueryLifecycleObserverFactory ?
                         new TraceDnsQueryLifeCycleObserverFactory() :
                         new BiDnsQueryLifecycleObserverFactory(new TraceDnsQueryLifeCycleObserverFactory(),
-                                dnsQueryLifecycleObserverFactory) :
+                                                               dnsQueryLifecycleObserverFactory) :
                 checkNotNull(dnsQueryLifecycleObserverFactory, "dnsQueryLifecycleObserverFactory");
         this.searchDomains = searchDomains != null ? searchDomains.clone() : DEFAULT_SEARCH_DOMAINS;
         this.ndots = ndots >= 0 ? ndots : DEFAULT_NDOTS;
@@ -897,7 +897,7 @@ public class DnsNameResolver extends InetNameResolver {
         final DnsServerAddressStream nameServerAddrs =
                 dnsServerAddressStreamProvider.nameServerAddressStream(hostname);
         new DnsAddressResolveContext(this, hostname, additionals, nameServerAddrs,
-                resolveCache, authoritativeDnsServerCache).resolve(promise);
+                                     resolveCache, authoritativeDnsServerCache).resolve(promise);
     }
 
     private static String hostname(String inetHost) {

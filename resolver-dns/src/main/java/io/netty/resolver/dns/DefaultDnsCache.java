@@ -56,12 +56,14 @@ public class DefaultDnsCache implements DnsCache {
 
         @Override
         public long getDelay(TimeUnit unit) {
+            // We ignore unit and always return the minimum value to ensure the TTL of the cancelled marker is
+            // the smallest.
             return Long.MIN_VALUE;
         }
 
         @Override
         public int compareTo(Delayed o) {
-            return -1;
+            throw new UnsupportedOperationException();
         }
 
         @Override
@@ -304,7 +306,6 @@ public class DefaultDnsCache implements DnsCache {
 
                         // Create a new List for COW semantics
                         List<DefaultDnsCacheEntry> newEntries = new ArrayList<DefaultDnsCacheEntry>(entries.size() + 1);
-                        DefaultDnsCacheEntry replacedEntry = null;
                         int i = 0;
                         do {
                             DefaultDnsCacheEntry entry = entries.get(i);
@@ -313,20 +314,10 @@ public class DefaultDnsCache implements DnsCache {
                             // more up-to-date data and cancel the old after we were able to update the cache.
                             if (!e.address().equals(entry.address())) {
                                 newEntries.add(entry);
-                            } else {
-                                assert replacedEntry == null;
-                                replacedEntry = entry;
                             }
-                            i++;
-                        } while (i < entries.size());
+                        } while (++i < entries.size());
                         newEntries.add(e);
                         if (compareAndSet(entries, Collections.unmodifiableList(newEntries))) {
-                            if (replacedEntry != null) {
-                                // We don't care if the replaced entry may have had a smaller TTL. At worse we will
-                                // clear the cache a bit to early which is fine as the TTL is just the maximum time
-                                // we are allowed to cache the entry.
-                            }
-
                             scheduleCacheExpirationIfNeeded(ttl, loop);
                             return;
                         }

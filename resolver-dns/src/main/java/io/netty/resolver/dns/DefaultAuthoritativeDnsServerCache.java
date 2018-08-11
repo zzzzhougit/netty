@@ -54,12 +54,14 @@ public class DefaultAuthoritativeDnsServerCache implements AuthoritativeDnsServe
 
         @Override
         public long getDelay(TimeUnit unit) {
+            // We ignore unit and always return the minimum value to ensure the TTL of the cancelled marker is
+            // the smallest.
             return Long.MIN_VALUE;
         }
 
         @Override
         public int compareTo(Delayed o) {
-            return -1;
+            throw new UnsupportedOperationException();
         }
 
         @Override
@@ -83,9 +85,10 @@ public class DefaultAuthoritativeDnsServerCache implements AuthoritativeDnsServe
         }
     };
 
-    private static final AtomicReferenceFieldUpdater<DefaultAuthoritativeDnsServerCache.Entries, ScheduledFuture>
+    @SuppressWarnings("rawtypes")
+    private static final AtomicReferenceFieldUpdater<Entries, ScheduledFuture>
             FUTURE_UPDATER = AtomicReferenceFieldUpdater.newUpdater(
-                    DefaultAuthoritativeDnsServerCache.Entries.class, ScheduledFuture.class, "expirationFuture");
+                    Entries.class, ScheduledFuture.class, "expirationFuture");
 
     private final ConcurrentMap<String, Entries> resolveCache = PlatformDependent.newConcurrentHashMap();
     private final int minTtl;
@@ -214,16 +217,14 @@ public class DefaultAuthoritativeDnsServerCache implements AuthoritativeDnsServe
                     int i = 0;
                     do {
                         InetSocketAddress address = entryList.get(i);
-                        if (!address.getHostName().equalsIgnoreCase(nameServerName)) {
+                        if (replacedEntry != null || !address.getHostName().equalsIgnoreCase(nameServerName)) {
                             newEntries.add(address);
                         } else {
                             // Replace the old entry.
-                            assert replacedEntry == null;
                             replacedEntry = address;
                             newEntries.add(addr);
                         }
-                        i++;
-                    } while (i < entryList.size());
+                    } while (++i < entryList.size());
 
                     if (replacedEntry == null) {
                         newEntries.add(addr);

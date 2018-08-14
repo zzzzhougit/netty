@@ -245,10 +245,15 @@ public class DefaultAuthoritativeDnsServerCache implements AuthoritativeDnsServe
         }
 
         private void scheduleCacheExpirationIfNeeded(int ttl, EventLoop loop) {
+            long start = System.nanoTime();
+            long ttlNanos = TimeUnit.SECONDS.toNanos(ttl);
+
             for (;;) {
                 ScheduledFuture<?> oldFuture = FUTURE_UPDATER.get(this);
-                if (oldFuture == null || oldFuture.getDelay(TimeUnit.SECONDS) > ttl) {
-                    ScheduledFuture<?> newFuture = loop.schedule(this, ttl, TimeUnit.SECONDS);
+                long calculatedTTL = ttlNanos - (System.nanoTime() - start);
+
+                if (oldFuture == null || oldFuture.getDelay(TimeUnit.NANOSECONDS) > calculatedTTL) {
+                    ScheduledFuture<?> newFuture = loop.schedule(this, calculatedTTL, TimeUnit.NANOSECONDS);
                     // It is possible that
                     // 1. task will fire in between this line, or
                     // 2. multiple timers may be set if there is concurrency
